@@ -20,40 +20,55 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar componentes Android
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
       - name: Preparar Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
 
-      - name: Localizar y extraer ZIP
+      - name: Preparar Android SDK existente
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager -print -quit)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: No se encontró sdkmanager."
+            exit 1
+          fi
+
+          echo "Usando: $SDKMANAGER"
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Localizar y extraer proyecto
         shell: bash
         run: |
           set -euo pipefail
 
           ZIP="$(find . -type f -iname '*.zip' \
-            -not -path './.git/*' \
-            -print -quit)"
+            -not -path './.git/*' -print -quit)"
 
           if [ -z "$ZIP" ]; then
-            echo "ERROR: No se encontró el ZIP del proyecto."
+            echo "ERROR: No se encontró el ZIP."
             exit 1
           fi
-
-          echo "ZIP encontrado: $ZIP"
 
           mkdir -p proyecto
           unzip -q "$ZIP" -d proyecto
 
-          echo "Contenido del proyecto:"
-          find proyecto -maxdepth 4 -type f | head -100
+          echo "ZIP extraído: $ZIP"
+
+          find proyecto -maxdepth 5 -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) -print
 
       - name: Detectar proyecto Android
         shell: bash
@@ -74,9 +89,9 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Proyecto encontrado: $PROJECT_DIR"
+          echo "Proyecto localizado: $PROJECT_DIR"
 
-      - name: Activar AndroidX y Jetifier
+      - name: Configurar AndroidX
         shell: bash
         run: |
           set -euo pipefail
@@ -91,8 +106,6 @@ jobs:
           grep -q '^android.enableJetifier=' gradle.properties \
             || echo 'android.enableJetifier=true' >> gradle.properties
 
-          echo "Configuración AndroidX aplicada."
-
       - name: Compilar APK
         shell: bash
         run: |
@@ -102,25 +115,23 @@ jobs:
 
           gradle --no-daemon --stacktrace assembleDebug
 
-      - name: Verificar APK generada
+      - name: Verificar APK
         shell: bash
         run: |
           set -euo pipefail
-
-          find proyecto -type f -name '*.apk' -print
 
           APK="$(find proyecto -type f \
             -path '*/build/outputs/apk/debug/*.apk' \
             -print -quit)"
 
           if [ -z "$APK" ]; then
-            echo "ERROR: No se encontró la APK."
+            echo "ERROR: No se generó la APK."
             exit 1
           fi
 
-          echo "APK generada correctamente: $APK"
+          echo "APK generada: $APK"
 
-      - name: Guardar APK
+      - name: Descargar APK generada
         uses: actions/upload-artifact@v4
         with:
           name: Matibatidos-POS-APK
