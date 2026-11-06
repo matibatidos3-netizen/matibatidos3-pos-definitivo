@@ -1,4 +1,4 @@
-name: Compilar Matibatidos POS de prueba
+name: Compilar Matibatidos POS Definitivo
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  construir:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,59 +20,110 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Preparar Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Localizar y extraer proyecto Android
+      - name: Instalar componentes Android
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Preparar Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Localizar y extraer ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+          ZIP="$(find . -type f -iname '*.zip' \
+            -not -path './.git/*' \
+            -print -quit)"
 
           if [ -z "$ZIP" ]; then
-            echo "ERROR: No se encontró ningún archivo ZIP en la raíz del repositorio."
+            echo "ERROR: No se encontró el ZIP del proyecto."
             exit 1
           fi
+
+          echo "ZIP encontrado: $ZIP"
 
           mkdir -p proyecto
           unzip -q "$ZIP" -d proyecto
 
-          echo "ZIP extraído: $ZIP"
-          echo "Buscando Gradle Wrapper..."
+          echo "Contenido del proyecto:"
+          find proyecto -maxdepth 4 -type f | head -100
 
-          find proyecto -type f -name gradlew -print
-
-      - name: Activar AndroidX y compilar APK
+      - name: Detectar proyecto Android
         shell: bash
         run: |
           set -euo pipefail
 
-          GRADLEW="$(find proyecto -type f -name gradlew -print -quit)"
+          SETTINGS="$(find proyecto -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -print -quit)"
 
-          if [ -z "$GRADLEW" ]; then
-            echo "ERROR: No se encontró gradlew dentro del ZIP."
-            echo "Revisa que el ZIP contenga el proyecto Android completo."
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontró settings.gradle."
             exit 1
           fi
 
-          PROJECT_DIR="$(dirname "$GRADLEW")"
-          cd "$PROJECT_DIR"
+          PROJECT_DIR="$(dirname "$SETTINGS")"
 
-          echo "Proyecto Android encontrado en: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Proyecto encontrado: $PROJECT_DIR"
+
+      - name: Activar AndroidX y Jetifier
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
 
           touch gradle.properties
 
-          if ! grep -q '^android.useAndroidX=true$' gradle.properties; then
-            echo 'android.useAndroidX=true' >> gradle.properties
+          grep -q '^android.useAndroidX=' gradle.properties \
+            || echo 'android.useAndroidX=true' >> gradle.properties
+
+          grep -q '^android.enableJetifier=' gradle.properties \
+            || echo 'android.enableJetifier=true' >> gradle.properties
+
+          echo "Configuración AndroidX aplicada."
+
+      - name: Compilar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verificar APK generada
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          find proyecto -type f -name '*.apk' -print
+
+          APK="$(find proyecto -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            -print -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: No se encontró la APK."
+            exit 1
           fi
 
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          echo "APK generada correctamente: $APK"
 
-      - name: Guardar APK de prueba
+      - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Matibatidos-APK-PRUEBA
+          name: Matibatidos-POS-APK
           path: proyecto/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
