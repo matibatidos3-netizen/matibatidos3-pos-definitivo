@@ -1,4 +1,4 @@
-- name: Preparar SDK de Android
+name: Preparar SDK de Android
         shell: bash
         run: |
           set -euo pipefail
