@@ -1,36 +1,4 @@
-name: Compilar Matibatidos POS Definitivo
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  construir:
-    name: Construir APK
-    runs-on: ubuntu-latest
-
-    steps:
-      # 1. Descargar el repositorio
-      - name: Descargar repositorio
-        uses: actions/checkout@v4
-
-      # 2. Configurar Java
-      - name: Preparar Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      # 3. Configurar Gradle
-      - name: Preparar Gradle 8.7
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.7"
-
-      # 4. Preparar SDK Android
-      - name: Preparar SDK de Android
+- name: Preparar SDK de Android
         shell: bash
         run: |
           set -euo pipefail
@@ -40,7 +8,7 @@ jobs:
             exit 1
           fi
 
-          SDKMANAGER="$(find "$ANDROID_HOME" \
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
             -type f -name sdkmanager -print -quit)"
 
           if [ -z "$SDKMANAGER" ]; then
@@ -48,135 +16,12 @@ jobs:
             exit 1
           fi
 
-          chmod +x "$SDKMANAGER"
+          echo "SDK encontrado: $SDKMANAGER"
 
-          yes | "$SDKMANAGER" --licenses || true
+          yes | bash "$SDKMANAGER" --licenses || true
 
-          "$SDKMANAGER" \
+          bash "$SDKMANAGER" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # 5. Localizar y extraer ZIP
-      - name: Extraer proyecto Android
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ZIP="$(find . -maxdepth 2 -type f \
-            -iname '*.zip' \
-            -not -path './.git/*' \
-            -print -quit)"
-
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: No se encontró el ZIP."
-            exit 1
-          fi
-
-          echo "Archivo encontrado: $ZIP"
-
-          mkdir -p proyecto
-          unzip -q "$ZIP" -d proyecto
-
-          echo "Archivos extraídos:"
-          find proyecto -maxdepth 4 -type f | head -100
-
-      # 6. Detectar proyecto Gradle
-      - name: Localizar proyecto Android
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          SETTINGS="$(find proyecto -type f \
-            \( -name settings.gradle \
-            -o -name settings.gradle.kts \) \
-            -print -quit)"
-
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No se encontró settings.gradle."
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$SETTINGS")"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Proyecto localizado: $PROJECT_DIR"
-
-      # 7. Configurar AndroidX
-      - name: Activar AndroidX y Jetifier
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          touch gradle.properties
-
-          grep -q '^android.useAndroidX=' gradle.properties \
-            || echo 'android.useAndroidX=true' >> gradle.properties
-
-          grep -q '^android.enableJetifier=' gradle.properties \
-            || echo 'android.enableJetifier=true' >> gradle.properties
-
-          echo "AndroidX activado correctamente."
-
-      # 8. Corregir dependencias Kotlin duplicadas
-      - name: Corregir conflicto de Kotlin
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cat > "$RUNNER_TEMP/kotlin-fix.gradle" <<'EOF'
-          allprojects {
-              configurations.configureEach {
-                  resolutionStrategy.force(
-                      "org.jetbrains.kotlin:kotlin-stdlib:1.8.22",
-                      "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22",
-                      "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"
-                  )
-              }
-          }
-          EOF
-
-          echo "Configuración de dependencias Kotlin preparada."
-
-      # 9. Compilar aplicación
-      - name: Compilar APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          gradle \
-            --no-daemon \
-            --stacktrace \
-            -I "$RUNNER_TEMP/kotlin-fix.gradle" \
-            assembleDebug
-
-      # 10. Comprobar APK
-      - name: Verificar APK generada
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK="$(find proyecto -type f \
-            -path '*/build/outputs/apk/debug/*.apk' \
-            -print -quit)"
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: No se encontró la APK generada."
-            exit 1
-          fi
-
-          echo "APK encontrada correctamente:"
-          ls -lh "$APK"
-
-      # 11. Guardar APK
-      - name: Descargar APK generada
-        uses: actions/upload-artifact@v4
-        with:
-          name: Matibatidos-POS-APK
-          path: proyecto/**/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
+          echo "SDK Android preparado correctamente."
